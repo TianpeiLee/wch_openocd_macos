@@ -1,7 +1,7 @@
 This is openocd.info, produced by makeinfo version 6.7 from
 openocd.texi.
 
-This User's Guide documents release 0.11.0+dev, dated 10 January 2022,
+This User's Guide documents release 0.11.0+dev, dated 28 October 2022,
 of the Open On-Chip Debugger (OpenOCD).
 
    * Copyright (C) 2008 The OpenOCD Project
@@ -27,7 +27,7 @@ File: openocd.info,  Node: Top,  Next: About,  Up: (dir)
 OpenOCD User's Guide
 ********************
 
-This User's Guide documents release 0.11.0+dev, dated 10 January 2022,
+This User's Guide documents release 0.11.0+dev, dated 28 October 2022,
 of the Open On-Chip Debugger (OpenOCD).
 
    * Copyright (C) 2008 The OpenOCD Project
@@ -589,6 +589,14 @@ USB-based ones.
      A JTAG driver acting as a client for the JTAG VPI server interface.
 
      Link: <http://github.com/fjullien/jtag_vpi>
+
+   * vdebug
+     A driver for Cadence virtual Debug Interface to emulated or
+     simulated targets.  It implements a client connecting to the vdebug
+     server, which in turn communicates with the emulated or simulated
+     RTL model through a transactor.  The current version supports only
+     JTAG as a transport, but other virtual transports, like DAP are
+     planned.
 
    * jtag_dpi
      A JTAG driver acting as a client for the SystemVerilog Direct
@@ -1863,9 +1871,9 @@ job:
 
          echo [format "set p15 0x%04x, 0x%08x" $regs $value]
 
-         arm mcr 15 [expr ($regs>>12)&0x7] \
-             [expr ($regs>>0)&0xf] [expr ($regs>>4)&0xf] \
-             [expr ($regs>>8)&0x7] $value
+         arm mcr 15 [expr {($regs >> 12) & 0x7}] \
+             [expr {($regs >> 0) & 0xf}] [expr {($regs >> 4) & 0xf}] \
+             [expr {($regs >> 8) & 0x7}] $value
      }
 
    ---------- Footnotes ----------
@@ -2358,6 +2366,39 @@ when OpenOCD is configured, in order to be made available at run time.
           safe levels with minimal impact on the target system.  Avoid
           floating inputs, conflicting outputs and initially asserted
           reset signals.
+
+      -- Command: ftdi oscan1_mode on|off
+          Enable or disable OScan1 mode.  This mode is intended for use
+          with an adapter, such as the ARM-JTAG-SWD by Olimex, that sits
+          in between the FTDI chip and the target.  The cJTAG prococol
+          is composed of two wires: TCKC (clock) and TMSC (data).  TMSC
+          is a bidirectional signal which is time-multiplexed
+          alternating TDI, TMS and TDO. The multiplexing is achieved by
+          a tri-state buffer which puts TMSC in Hi-Z when the device is
+          supposed to take the control of the line (TDO phase).
+
+          The ARM-JTAG-SWD adapter uses standard TRST and TMS signals to
+          control TMSC direction.  TRST is used by the adapter as
+          selector for the multiplexers which set the JTAG probe in
+          2-wire mode.  Whatever signal is used for this purpose, it
+          must be defined with the name JTAG_SEL using 'ftdi
+          layout_signal'.  JTAG_SEL is set to 0 during OScan1
+          initialization.
+
+          Some JTAG probes like the Digilent JTAG-HS2, support cJTAG by
+          using a separate pin to control when TMS is driven onto TMSC.
+          You can use such probes by defining the signal TMSC_EN using
+          'ftdi layout_signal TMSC_EN -data <mask>'.
+
+      -- Command: ftdi jscan3_mode on|off
+          Enable or disable JScan3 mode.  This mode uses the classic
+          4-wire JTAG protocol in chips whose JTAG port is only
+          compliant with the cJTAG standard (IEEE 1149.7).
+
+          Since cJTAG needs a 2-wire escape sequence to select the
+          operating mode, a cJTAG adapter like ARM-JTAG-SWD by Olimex is
+          still required.  This means that a cJTAG probe configuration
+          script must be used too.
 
       -- Command: ftdi layout_signal name ['-data'|'-ndata' data_mask]
                ['-input'|'-ninput' input_mask] ['-oe'|'-noe' oe_mask]
@@ -2877,7 +2918,9 @@ when OpenOCD is configured, in order to be made available at run time.
           The result can be converted to Volts (ignoring the most
           significant bytes, always zero)
                > set a [st-link cmd 8 0xf7 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0]
-               > echo [expr 2*1.2*([lindex $a 4]+256*[lindex $a 5])/([lindex $a 0]+256*[lindex $a 1])]
+               > set n [expr {[lindex $a 4] + 256 * [lindex $a 5]}]
+               > set d [expr {[lindex $a 0] + 256 * [lindex $a 1]}]
+               > echo [expr {2 * 1.2 * $n / $d}]
                3.24891518738
 
  -- Interface Driver: opendous
@@ -3043,6 +3086,40 @@ when OpenOCD is configured, in order to be made available at run time.
       -- Config Command: openjtag device_desc string
           The USB device description string of the adapter.  This value
           is only used with the standard variant.
+
+ -- Interface Driver: vdebug
+     Cadence Virtual Debug Interface driver.
+
+      -- Config Command: vdebug server host:port
+          Specifies the host and TCP port number where the vdebug server
+          runs.
+
+      -- Config Command: vdebug batching value
+          Specifies the batching method for the vdebug request.
+          Possible values are 0 for no batching 1 or wr to batch write
+          transactions together (default) 2 or rw to batch both read and
+          write transactions
+
+      -- Config Command: vdebug polling min max
+          Takes two values, representing the polling interval in ms.
+          Lower values mean faster debugger responsiveness, but lower
+          emulation performance.  The minimum should be around 10,
+          maximum should not exceed 1000, which is the default gdb and
+          keepalive timeout value.
+
+      -- Config Command: vdebug bfm_path path clk_period
+          Specifies the hierarchical path and input clk period of the
+          vdebug BFM in the design.  The hierarchical path uses Verilog
+          notation top.inst.inst The clock period must include the unit,
+          for instance 40ns.
+
+      -- Config Command: vdebug mem_path path base size
+          Specifies the hierarchical path to the design memory instance
+          for backdoor access.  Up to 4 memories can be specified.  The
+          hierarchical path uses Verilog notation.  The base specifies
+          start address in the design address space, size its size in
+          bytes.  Both values can use hexadecimal notation with prefix
+          0x.
 
  -- Interface Driver: jtag_dpi
      SystemVerilog Direct Programming Interface (DPI) compatible driver
@@ -3728,6 +3805,11 @@ while others (including dots!)  are not.
           the version field than to update config files to handle all of
           the various chip IDs.  The version field is defined as bit
           28-31 of the IDCODE.
+        * '-ignore-bypass'
+          Specify this to ignore the 'bypass' bit of the idcode.  Some
+          vendor put an invalid idcode regarding this bit.  Specify this
+          to ignore this bit and to not consider this tap in bypass
+          mode.
         * '-ircapture' NUMBER
           The bit pattern loaded by the TAP into the JTAG shift register
           on entry to the IRCAPTURE state, such as 0x01.  JTAG requires
@@ -4033,12 +4115,12 @@ The following commands exist as subcommands of DAP instances:
      positions where the mask bit is 1.  The following example sets
      HPROT3 (cacheable) and leaves the rest of the pattern intact.  It
      configures memory access through DCache on Cortex-M7.
-          set CSW_HPROT3_CACHEABLE [expr 1 << 27]
+          set CSW_HPROT3_CACHEABLE [expr {1 << 27}]
           samv.dap apcsw $CSW_HPROT3_CACHEABLE $CSW_HPROT3_CACHEABLE
 
      Another example clears SPROT bit and leaves the rest of pattern
      intact:
-          set CSW_SPROT [expr 1 << 30]
+          set CSW_SPROT [expr {1 << 30}]
           samv.dap apcsw 0 $CSW_SPROT
 
      _Note:_ If you want to check the real value of CSW, not CSW
@@ -4157,6 +4239,8 @@ command to list them.
         * 'dsp5680xx' - implements Freescale's 5680x DSP.
         * 'esirisc' - this is an EnSilica eSi-RISC core.  The current
           implementation supports eSi-32xx cores.
+        * 'esp32c2' - this is an Espressif SoC with single RISC-V core.
+        * 'esp32c3' - this is an Espressif SoC with single RISC-V core.
         * 'fa526' - resembles arm920 (w/o Thumb).
         * 'feroceon' - resembles arm926.
         * 'hla_target' - a Cortex-M alternative to work with HL adapters
@@ -4174,9 +4258,12 @@ command to list them.
           comply to GDB remote protocol.
         * 'mips_m4k' - a MIPS core.
         * 'mips_mips64' - a MIPS64 core.
-        * 'nds32_v2' - this is an Andes NDS32 v2 core.
-        * 'nds32_v3' - this is an Andes NDS32 v3 core.
-        * 'nds32_v3m' - this is an Andes NDS32 v3m core.
+        * 'nds32_v2' - this is an Andes NDS32 v2 core (deprecated; would
+          be removed in v0.13.0).
+        * 'nds32_v3' - this is an Andes NDS32 v3 core (deprecated; would
+          be removed in v0.13.0).
+        * 'nds32_v3m' - this is an Andes NDS32 v3m core (deprecated;
+          would be removed in v0.13.0).
         * 'or1k' - this is an OpenRISC 1000 core.  The current
           implementation supports three JTAG TAP cores:
              - 'OpenCores TAP' (See:
@@ -4396,23 +4483,61 @@ The commands supported by OpenOCD target objects are:
      deal with specific reset cases.  They are not otherwise documented
      here.
 
- -- Command: $target_name array2mem arrayname width address count
- -- Command: $target_name mem2array arrayname width address count
-     These provide an efficient script-oriented interface to memory.
-     The 'array2mem' primitive writes bytes, halfwords, words or
-     double-words; while 'mem2array' reads them.  In both cases, the TCL
-     side uses an array, and the target side uses raw memory.
+ -- Command: $target_name set_reg dict
+     Set register values of the target.
 
-     The efficiency comes from enabling the use of bulk JTAG data
-     transfer operations.  The script orientation comes from working
-     with data values that are packaged for use by TCL scripts; 'mdw'
-     type primitives only print data they retrieve, and neither store
-     nor return those values.
+        * DICT ...  Tcl dictionary with pairs of register names and
+          values.
 
-        * ARRAYNAME ...  is the name of an array variable
-        * WIDTH ...  is 8/16/32/64 - indicating the memory access size
-        * ADDRESS ...  is the target memory address
-        * COUNT ...  is the number of elements to process
+     For example, the following command sets the value 0 to the program
+     counter (pc) register and 0x1000 to the stack pointer (sp)
+     register:
+
+          set_reg {pc 0 sp 0x1000}
+
+ -- Command: $target_name get_reg [-force] list
+     Get register values from the target and return them as Tcl
+     dictionary with pairs of register names and values.  If option
+     "-force" is set, the register values are read directly from the
+     target, bypassing any caching.
+
+        * LIST ...  List of register names
+
+     For example, the following command retrieves the values from the
+     program counter (pc) and stack pointer (sp) register:
+
+          get_reg {pc sp}
+
+ -- Command: $target_name write_memory address width data ['phys']
+     This function provides an efficient way to write to the target
+     memory from a Tcl script.
+
+        * ADDRESS ...  target memory address
+        * WIDTH ...  memory access bit size, can be 8, 16, 32 or 64
+        * DATA ...  Tcl list with the elements to write
+        * ['phys'] ...  treat the memory address as physical instead of
+          virtual address
+
+     For example, the following command writes two 32 bit words into the
+     target memory at address 0x20000000:
+
+          write_memory 0x20000000 32 {0xdeadbeef 0x00230500}
+
+ -- Command: $target_name read_memory address width count ['phys']
+     This function provides an efficient way to read the target memory
+     from a Tcl script.  A Tcl list containing the requested memory
+     elements is returned by this function.
+
+        * ADDRESS ...  target memory address
+        * WIDTH ...  memory access bit size, can be 8, 16, 32 or 64
+        * COUNT ...  number of elements to read
+        * ['phys'] ...  treat the memory address as physical instead of
+          virtual address
+
+     For example, the following command reads two 32 bit words from the
+     target memory at address 0x20000000:
+
+          read_memory 0x20000000 32 2
 
  -- Command: $target_name cget queryparm
      Each configuration parameter accepted by '$target_name configure'
@@ -4461,8 +4586,8 @@ The commands supported by OpenOCD target objects are:
      active, ADDR is interpreted as a virtual address.  Otherwise, or if
      the optional PHYS flag is specified, ADDR is interpreted as a
      physical address.  If COUNT is specified, displays that many units.
-     (If you want to manipulate the data instead of displaying it, see
-     the 'mem2array' primitives.)
+     (If you want to process the data instead of displaying it, see the
+     'read_memory' primitives.)
 
  -- Command: $target_name mwd [phys] addr doubleword [count]
  -- Command: $target_name mww [phys] addr word [count]
@@ -4604,6 +4729,30 @@ The following target events are defined:
      After single-step has completed
    * trace-config
      After target hardware trace configuration was changed
+   * semihosting-user-cmd-0x100
+     The target made a semihosting call with user-defined operation
+     number 0x100
+   * semihosting-user-cmd-0x101
+     The target made a semihosting call with user-defined operation
+     number 0x101
+   * semihosting-user-cmd-0x102
+     The target made a semihosting call with user-defined operation
+     number 0x102
+   * semihosting-user-cmd-0x103
+     The target made a semihosting call with user-defined operation
+     number 0x103
+   * semihosting-user-cmd-0x104
+     The target made a semihosting call with user-defined operation
+     number 0x104
+   * semihosting-user-cmd-0x105
+     The target made a semihosting call with user-defined operation
+     number 0x105
+   * semihosting-user-cmd-0x106
+     The target made a semihosting call with user-defined operation
+     number 0x106
+   * semihosting-user-cmd-0x107
+     The target made a semihosting call with user-defined operation
+     number 0x107
 
      Note: OpenOCD events are not supposed to be preempt by another
      event, but this is not enforced in current code.  Only the target
@@ -5588,11 +5737,20 @@ activate driver-specific commands.
           flash bank $_FLASHNAME cc3220sf 0 0 0 0 $_TARGETNAME
 
  -- Flash Driver: efm32
-     All members of the EFM32 microcontroller family from Energy Micro
-     include internal flash and use ARM Cortex-M3 cores.  The driver
-     automatically recognizes a number of these chips using the chip
-     identification register, and autoconfigures itself.
+     All members of the EFM32/EFR32 microcontroller family from Energy
+     Micro (now Silicon Labs) include internal flash and use Arm
+     Cortex-M3 or Cortex-M4 cores.  The driver automatically recognizes
+     a number of these chips using the chip identification register, and
+     autoconfigures itself.
           flash bank $_FLASHNAME efm32 0 0 0 0 $_TARGETNAME
+     It supports writing to the user data page, as well as the portion
+     of the lockbits page past 512 bytes on chips with larger page
+     sizes.  The latter is used by the SiLabs bootloader/AppLoader
+     system for encryption keys.  Setting protection on these pages is
+     currently not supported.
+          flash bank userdata.flash efm32 0x0FE00000 0 0 0 $_TARGETNAME
+          flash bank lockbits.flash efm32 0x0FE04000 0 0 0 $_TARGETNAME
+
      A special feature of efm32 controllers is that it is possible to
      completely disable the debug interface by writing the correct
      values to the 'Debug Lock Word'.  OpenOCD supports this via the
@@ -6273,6 +6431,7 @@ activate driver-specific commands.
      families from STMicroelectronics and all members of the GD32F1x0,
      GD32F3x0 and GD32E23x microcontroller families from GigaDevice
      include internal flash and use ARM Cortex-M0/M3/M4/M23 cores.  The
+     driver also works with GD32VF103 powered by RISC-V core.  The
      driver automatically recognizes a number of these chips using the
      chip identification register, and autoconfigures itself.
 
